@@ -9,7 +9,7 @@ use std::{
     ffi::OsString,
     fs::{create_dir_all, read_dir},
     path, process,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 static NSIM: usize = 1000;
@@ -25,9 +25,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     let input_path: path::PathBuf = get_nth_arg(1)
         .unwrap_or("imputation_results/".into())
         .into();
-    let exp_output_path: path::PathBuf = get_nth_arg(1)
-        .unwrap_or("imputed_expected_matches/".into())
-        .into();
+    let exp_output_path: path::PathBuf =
+        get_nth_arg(1).unwrap_or("computed_matches/".into()).into();
 
     create_dir_all(exp_output_path.clone())?;
 
@@ -235,7 +234,7 @@ fn sample_allele(p: &[f64], rng: &mut impl Rng) -> usize {
 // reading in the tsv,,, weird polars code incoming
 fn read_imputed_table(data: path::PathBuf) -> Result<DataFrame, Box<dyn Error>> {
     // define the schema with all string fields
-    let sch = Schema::from(
+    let sch = Arc::new(Schema::from(
         vec![
             Field::new("locus", DataType::Utf8),
             Field::new("sample", DataType::Utf8),
@@ -246,13 +245,13 @@ fn read_imputed_table(data: path::PathBuf) -> Result<DataFrame, Box<dyn Error>> 
             Field::new("gp", DataType::Utf8),
         ]
         .into_iter(),
-    );
+    ));
 
     // read in the tsv
     let mut d = CsvReader::from_path(data)?
         .with_delimiter(b'\t')
         .has_header(false)
-        .with_schema(&sch)
+        .with_schema(sch)
         .finish()?;
 
     let descending = vec![false, false];
@@ -268,20 +267,20 @@ fn read_imputed_table(data: path::PathBuf) -> Result<DataFrame, Box<dyn Error>> 
 
 fn read_true_table(data: path::PathBuf) -> Result<DataFrame, Box<dyn Error>> {
     // define the schema with all string fields
-    let sch = Schema::from(
+    let sch = Arc::new(Schema::from(
         vec![
             Field::new("locus", DataType::Utf8),
             Field::new("sample", DataType::Utf8),
             Field::new("genotype", DataType::Utf8),
         ]
         .into_iter(),
-    );
+    ));
 
     // read in the tsv
     let mut d = CsvReader::from_path(data)?
         .with_delimiter(b'\t')
         .has_header(false)
-        .with_schema(&sch)
+        .with_schema(sch)
         .finish()?;
 
     let descending = vec![false, false];
