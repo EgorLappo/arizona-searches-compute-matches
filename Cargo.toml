@@ -1,0 +1,12 @@
+[package]
+name = "matches"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+csv = "1.2.1"
+linya = "0.3.0"
+polars = { version = "0.28.0", features = ["performant"] }
+rand = "0.8.5"
+rayon = "1.7.0"
+serde = { version = "1.0.155", features = ["derive"] }
