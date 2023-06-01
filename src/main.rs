@@ -190,7 +190,7 @@ fn pair_matches(samples: &[Sample], i: usize, j: usize, rep: usize, rng: &mut im
 fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64, f64, f64) {
     let nloci = samples[i].nloci;
 
-    let mut pi = vec![vec![vec![0.0; nloci]; nloci]; nloci];
+    let mut pi = vec![vec![vec![0.0; nloci + 1]; nloci + 1]; nloci];
 
     let p00s: Vec<f64> = (0..nloci)
         .map(|l| {
@@ -231,11 +231,9 @@ fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64
 
     // now do dynamic programming on this
     for l in 1..nloci {
-        for m in 0..nloci {
-            for p in 0..nloci {
-                if m + p > l {
-                    continue;
-                } else if m == 0 && p == 0 {
+        for m in 0..=nloci {
+            for p in 0..=(nloci - m) {
+                if m == 0 && p == 0 {
                     pi[l][m][p] = pi[l - 1][m][p] * p00s[l];
                 } else if m == 0 {
                     pi[l][m][p] = pi[l - 1][m][p] * p00s[l] + pi[l - 1][m][p - 1] * p01s[l]
@@ -260,10 +258,10 @@ fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64
     let mut allele_expectation = 0.0;
     for (m, row) in pi.iter().enumerate() {
         for (p, prob) in row.iter().enumerate() {
-            full_expectation += prob * (m + 1) as f64;
-            partial_expectation += prob * (p + 1) as f64;
-            no_expectation += prob * (nloci - m - p - 2) as f64;
-            allele_expectation += prob * (2 * (m + 1) + (p + 1)) as f64;
+            full_expectation += prob * m as f64;
+            partial_expectation += prob * p as f64;
+            no_expectation += prob * (nloci - m - p) as f64;
+            allele_expectation += prob * (2 * m + p) as f64;
         }
     }
 
