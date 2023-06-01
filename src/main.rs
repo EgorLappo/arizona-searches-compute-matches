@@ -192,24 +192,47 @@ fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64
 
     let mut pi = vec![vec![vec![0.0; nloci]; nloci]; nloci];
 
-    pi[0][0][0] = p00(
-        &samples[i].ap1[0],
-        &samples[i].ap2[0],
-        &samples[j].ap1[0],
-        &samples[j].ap2[0],
-    );
-    pi[0][0][1] = p01(
-        &samples[i].ap1[0],
-        &samples[i].ap2[0],
-        &samples[j].ap1[0],
-        &samples[j].ap2[0],
-    );
-    pi[0][1][0] = p10(
-        &samples[i].ap1[0],
-        &samples[i].ap2[0],
-        &samples[j].ap1[0],
-        &samples[j].ap2[0],
-    );
+    let p00s: Vec<f64> = (0..nloci)
+        .map(|l| {
+            p00(
+                &samples[i].ap1[l],
+                &samples[i].ap2[l],
+                &samples[j].ap1[l],
+                &samples[j].ap2[l],
+            )
+        })
+        .collect();
+
+    let p01s: Vec<f64> = (0..nloci)
+        .map(|l| {
+            p01(
+                &samples[i].ap1[l],
+                &samples[i].ap2[l],
+                &samples[j].ap1[l],
+                &samples[j].ap2[l],
+            )
+        })
+        .collect();
+
+    let p10s: Vec<f64> = (0..nloci)
+        .map(|l| {
+            p10(
+                &samples[i].ap1[l],
+                &samples[i].ap2[l],
+                &samples[j].ap1[l],
+                &samples[j].ap2[l],
+            )
+        })
+        .collect();
+
+    // assert that p00 + p10 + p01 = 1 for all l
+    for l in 0..nloci {
+        assert!((p00s[l] + p01s[l] + p10s[l] - 1.0).abs() < 1e-6);
+    }
+
+    pi[0][0][0] = p00s[0];
+    pi[0][0][1] = p01s[0];
+    pi[0][1][0] = p10s[0];
 
     // now do dynamic programming on this
     for l in 1..nloci {
@@ -218,65 +241,15 @@ fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64
                 if m + p > l {
                     continue;
                 } else if m == 0 && p == 0 {
-                    pi[l][m][p] = pi[l - 1][m][p]
-                        * p00(
-                            &samples[i].ap1[l - 1],
-                            &samples[i].ap2[l - 1],
-                            &samples[j].ap1[l - 1],
-                            &samples[j].ap2[l - 1],
-                        )
+                    pi[l][m][p] = pi[l - 1][m][p] * p00s[l];
                 } else if m == 0 {
-                    pi[l][m][p] = pi[l - 1][m][p]
-                        * p00(
-                            &samples[i].ap1[l - 1],
-                            &samples[i].ap2[l - 1],
-                            &samples[j].ap1[l - 1],
-                            &samples[j].ap2[l - 1],
-                        )
-                        + pi[l - 1][m][p - 1]
-                            * p01(
-                                &samples[i].ap1[l - 1],
-                                &samples[i].ap2[l - 1],
-                                &samples[j].ap1[l - 1],
-                                &samples[j].ap2[l - 1],
-                            )
+                    pi[l][m][p] = pi[l - 1][m][p] * p00s[l] + pi[l - 1][m][p - 1] * p01s[l]
                 } else if p == 0 {
-                    pi[l][m][p] = pi[l - 1][m - 1][p]
-                        * p10(
-                            &samples[i].ap1[l - 1],
-                            &samples[i].ap2[l - 1],
-                            &samples[j].ap1[l - 1],
-                            &samples[j].ap2[l - 1],
-                        )
-                        + pi[l - 1][m][p]
-                            * p00(
-                                &samples[i].ap1[l - 1],
-                                &samples[i].ap2[l - 1],
-                                &samples[j].ap1[l - 1],
-                                &samples[j].ap2[l - 1],
-                            )
+                    pi[l][m][p] = pi[l - 1][m][p] * p00s[l] + pi[l - 1][m - 1][p] * p10s[l]
                 } else {
-                    pi[l][m][p] = pi[l - 1][m - 1][p]
-                        * p10(
-                            &samples[i].ap1[l - 1],
-                            &samples[i].ap2[l - 1],
-                            &samples[j].ap1[l - 1],
-                            &samples[j].ap2[l - 1],
-                        )
-                        + pi[l - 1][m][p - 1]
-                            * p01(
-                                &samples[i].ap1[l - 1],
-                                &samples[i].ap2[l - 1],
-                                &samples[j].ap1[l - 1],
-                                &samples[j].ap2[l - 1],
-                            )
-                        + pi[l - 1][m][p]
-                            * p00(
-                                &samples[i].ap1[l - 1],
-                                &samples[i].ap2[l - 1],
-                                &samples[j].ap1[l - 1],
-                                &samples[j].ap2[l - 1],
-                            )
+                    pi[l][m][p] = pi[l - 1][m][p] * p00s[l]
+                        + pi[l - 1][m - 1][p] * p10s[l]
+                        + pi[l - 1][m][p - 1] * p01s[l]
                 }
             }
         }
