@@ -225,11 +225,6 @@ fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64
         })
         .collect();
 
-    // assert that p00 + p10 + p01 = 1 for all l
-    for l in 0..nloci {
-        assert!((p00s[l] + p01s[l] + p10s[l] - 1.0).abs() < 1e-6);
-    }
-
     pi[0][0][0] = p00s[0];
     pi[0][0][1] = p01s[0];
     pi[0][1][0] = p10s[0];
