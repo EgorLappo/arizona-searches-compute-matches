@@ -13,6 +13,7 @@ use std::{
 };
 
 static NSIM: usize = 1000;
+static SIMULATE: bool = false;
 
 fn get_nth_arg(n: usize) -> Result<OsString, Box<dyn Error>> {
     match env::args_os().nth(n) {
@@ -120,38 +121,14 @@ fn compare_genotypes_partial(a: (usize, usize), b: (usize, usize)) -> bool {
 }
 
 fn pair_matches(samples: &[Sample], i: usize, j: usize, rep: usize, rng: &mut impl Rng) -> Match {
-    // number of full matches in each simulated comparison
-    let mut fs = vec![0.0; NSIM];
-    // number of partial matches in each simulated comparison
-    let mut ps = vec![0.0; NSIM];
-    // number of no matches in each simulated comparison
-    let mut ns = vec![0.0; NSIM];
+    let (fs, ps, ns, als) = simulate_expected_matches(samples, i, j, rng);
+    let sim_full_matches = fs.iter().sum::<f64>() / NSIM as f64;
+    let sim_partial_matches = ps.iter().sum::<f64>() / NSIM as f64;
+    let sim_no_matches = ns.iter().sum::<f64>() / NSIM as f64;
+    let sim_allele_matches = als.iter().sum::<f64>() / NSIM as f64;
 
-    let mut allele_matches = vec![0.0; NSIM];
-
-    // do many simulated comparisons
-    for r in 0..NSIM {
-        // sample genotypes for each sample
-        let s1 = sample_genotype(&samples[i], rng);
-        let s2 = sample_genotype(&samples[j], rng);
-
-        // for each locus, check if the genotypes match
-        for k in 0..s1.len() {
-            let g1 = s1[k];
-            let g2 = s2[k];
-
-            if compare_genotypes_full(g1, g2) {
-                fs[r] += 1.0;
-            } else if compare_genotypes_partial(g1, g2) {
-                // very important: partial match is conditional on no full match!!
-                ps[r] += 1.0;
-            } else {
-                ns[r] += 1.0;
-            }
-        }
-
-        allele_matches[r] = 2. * fs[r] + ps[r];
-    }
+    let (mean_full_matches, mean_partial_matches, mean_no_matches, mean_allele_matches) =
+        compute_expected_matches(samples, i, j);
 
     // calculate called matches using the imp_gt value for each sample
     // calculate true matches using the true_gt value for each sample
@@ -191,10 +168,14 @@ fn pair_matches(samples: &[Sample], i: usize, j: usize, rep: usize, rng: &mut im
         rep,
         s1: i,
         s2: j,
-        mean_full_matches: fs.iter().sum::<f64>() / NSIM as f64,
-        mean_partial_matches: ps.iter().sum::<f64>() / NSIM as f64,
-        mean_no_matches: ns.iter().sum::<f64>() / NSIM as f64,
-        mean_allele_matches: allele_matches.iter().sum::<f64>() / NSIM as f64,
+        mean_full_matches,
+        mean_partial_matches,
+        mean_no_matches,
+        mean_allele_matches,
+        sim_full_matches,
+        sim_partial_matches,
+        sim_no_matches,
+        sim_allele_matches,
         called_full_matches: called_fs,
         called_partial_matches: called_ps,
         called_no_matches: called_ns,
@@ -204,6 +185,222 @@ fn pair_matches(samples: &[Sample], i: usize, j: usize, rep: usize, rng: &mut im
         true_no_matches: true_ns,
         true_allele_matches: 2 * true_fs + true_ps,
     }
+}
+
+fn compute_expected_matches(samples: &[Sample], i: usize, j: usize) -> (f64, f64, f64, f64) {
+    let nloci = samples[i].nloci;
+
+    let mut pi = vec![vec![vec![0.0; nloci]; nloci]; nloci];
+
+    pi[0][0][0] = p00(
+        &samples[i].ap1[0],
+        &samples[i].ap2[0],
+        &samples[j].ap1[0],
+        &samples[j].ap2[0],
+    );
+    pi[0][0][1] = p01(
+        &samples[i].ap1[0],
+        &samples[i].ap2[0],
+        &samples[j].ap1[0],
+        &samples[j].ap2[0],
+    );
+    pi[0][1][0] = p10(
+        &samples[i].ap1[0],
+        &samples[i].ap2[0],
+        &samples[j].ap1[0],
+        &samples[j].ap2[0],
+    );
+
+    // now do dynamic programming on this
+    for l in 1..nloci {
+        for m in 0..nloci {
+            for p in 0..nloci {
+                if m + p > l {
+                    continue;
+                } else if m == 0 && p == 0 {
+                    pi[l][m][p] = pi[l - 1][m][p]
+                        * p00(
+                            &samples[i].ap1[l - 1],
+                            &samples[i].ap2[l - 1],
+                            &samples[j].ap1[l - 1],
+                            &samples[j].ap2[l - 1],
+                        )
+                } else if m == 0 {
+                    pi[l][m][p] = pi[l - 1][m][p]
+                        * p00(
+                            &samples[i].ap1[l - 1],
+                            &samples[i].ap2[l - 1],
+                            &samples[j].ap1[l - 1],
+                            &samples[j].ap2[l - 1],
+                        )
+                        + pi[l - 1][m][p - 1]
+                            * p01(
+                                &samples[i].ap1[l - 1],
+                                &samples[i].ap2[l - 1],
+                                &samples[j].ap1[l - 1],
+                                &samples[j].ap2[l - 1],
+                            )
+                } else if p == 0 {
+                    pi[l][m][p] = pi[l - 1][m - 1][p]
+                        * p10(
+                            &samples[i].ap1[l - 1],
+                            &samples[i].ap2[l - 1],
+                            &samples[j].ap1[l - 1],
+                            &samples[j].ap2[l - 1],
+                        )
+                        + pi[l - 1][m][p]
+                            * p00(
+                                &samples[i].ap1[l - 1],
+                                &samples[i].ap2[l - 1],
+                                &samples[j].ap1[l - 1],
+                                &samples[j].ap2[l - 1],
+                            )
+                } else {
+                    pi[l][m][p] = pi[l - 1][m - 1][p]
+                        * p10(
+                            &samples[i].ap1[l - 1],
+                            &samples[i].ap2[l - 1],
+                            &samples[j].ap1[l - 1],
+                            &samples[j].ap2[l - 1],
+                        )
+                        + pi[l - 1][m][p - 1]
+                            * p01(
+                                &samples[i].ap1[l - 1],
+                                &samples[i].ap2[l - 1],
+                                &samples[j].ap1[l - 1],
+                                &samples[j].ap2[l - 1],
+                            )
+                        + pi[l - 1][m][p]
+                            * p00(
+                                &samples[i].ap1[l - 1],
+                                &samples[i].ap2[l - 1],
+                                &samples[j].ap1[l - 1],
+                                &samples[j].ap2[l - 1],
+                            )
+                }
+            }
+        }
+    }
+
+    // now compute expectations
+    // redefine pi as the last element of pi
+    let pi = pi[nloci - 1].clone();
+
+    let mut full_expectation = 0.0;
+    let mut partial_expectation = 0.0;
+    let mut no_expectation = 0.0;
+    let mut allele_expectation = 0.0;
+    for (m, row) in pi.iter().enumerate() {
+        for (p, prob) in row.iter().enumerate() {
+            full_expectation += prob * (m + 1) as f64;
+            partial_expectation += prob * (p + 1) as f64;
+            no_expectation += prob * (nloci - m - p - 2) as f64;
+            allele_expectation += prob * (2 * (m + 1) + (p + 1)) as f64;
+        }
+    }
+
+    (
+        full_expectation,
+        partial_expectation,
+        no_expectation,
+        allele_expectation,
+    )
+}
+
+fn p10(a1: &[f64], a2: &[f64], b1: &[f64], b2: &[f64]) -> f64 {
+    let nl = a1.len();
+    let mut p = 0.0;
+
+    for i in 0..nl {
+        for j in 0..nl {
+            if i != j {
+                p += a1[i] * a2[j] * (b1[i] * b2[j] + b1[j] * b2[i]);
+            }
+        }
+
+        p += a1[i] * a2[i] * b1[i] * b2[i];
+    }
+
+    p
+}
+
+fn p01(a1: &[f64], a2: &[f64], b1: &[f64], b2: &[f64]) -> f64 {
+    let nl = a1.len();
+    let mut p = 0.0;
+
+    for i in 0..nl {
+        for j in 0..nl {
+            if i != j {
+                p += a1[i]
+                    * a2[j]
+                    * (b1[i] * (1. - b2[j])
+                        + b1[j] * (1. - b2[i])
+                        + (1. - b1[i] - b1[j]) * (b2[i] + b2[j]));
+            }
+        }
+
+        p += a1[i] * a2[i] * (b1[i] * (1. - b2[i]) + (1. - b1[i]) * b2[i]);
+    }
+
+    p
+}
+
+fn p00(a1: &[f64], a2: &[f64], b1: &[f64], b2: &[f64]) -> f64 {
+    let nl = a1.len();
+    let mut p = 0.0;
+
+    for i in 0..nl {
+        for j in 0..nl {
+            if i != j {
+                p += a1[i] * a2[j] * (1. - b1[i] - b1[j]) * (1. - b2[i] - b2[j]);
+            }
+        }
+
+        p += a1[i] * a2[i] * (1. - b1[i]) * (1. - b2[i]);
+    }
+
+    p
+}
+
+fn simulate_expected_matches(
+    samples: &[Sample],
+    i: usize,
+    j: usize,
+    rng: &mut impl Rng,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    // number of full matches in each simulated comparison
+    let mut fs = vec![0.0; NSIM];
+    // number of partial matches in each simulated comparison
+    let mut ps = vec![0.0; NSIM];
+    // number of no matches in each simulated comparison
+    let mut ns = vec![0.0; NSIM];
+    // number of allele matches in each simulated comparison
+    let mut als = vec![0.0; NSIM];
+
+    // do many simulated comparisons
+    for r in 0..NSIM {
+        // sample genotypes for each sample
+        let s1 = sample_genotype(&samples[i], rng);
+        let s2 = sample_genotype(&samples[j], rng);
+
+        // for each locus, check if the genotypes match
+        for k in 0..s1.len() {
+            let g1 = s1[k];
+            let g2 = s2[k];
+
+            if compare_genotypes_full(g1, g2) {
+                fs[r] += 1.0;
+            } else if compare_genotypes_partial(g1, g2) {
+                // very important: partial match is conditional on no full match!!
+                ps[r] += 1.0;
+            } else {
+                ns[r] += 1.0;
+            }
+        }
+
+        als[r] = 2. * fs[r] + ps[r];
+    }
+    (fs, ps, ns, als)
 }
 
 fn sample_genotype(s: &Sample, rng: &mut impl Rng) -> Vec<(usize, usize)> {
@@ -407,6 +604,10 @@ struct Match {
     mean_partial_matches: f64,
     mean_no_matches: f64,
     mean_allele_matches: f64,
+    sim_full_matches: f64,
+    sim_partial_matches: f64,
+    sim_no_matches: f64,
+    sim_allele_matches: f64,
     called_full_matches: usize,
     called_partial_matches: usize,
     called_no_matches: usize,
