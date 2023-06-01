@@ -31,8 +31,6 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     create_dir_all(exp_output_path.clone())?;
 
-    println!("now with analytical computations!");
-
     let rep_folders: Vec<path::PathBuf> = read_dir(input_path)
         .unwrap()
         .map(|x| x.unwrap().path())
